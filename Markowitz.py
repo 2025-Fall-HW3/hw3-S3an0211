@@ -63,6 +63,19 @@ class EqualWeightPortfolio:
         TODO: Complete Task 1 Below
         """
 
+        # number of investable assets (exclude SPY)
+        n_assets = len(assets)
+        if n_assets > 0:
+            # equal weight for each non-excluded asset
+            equal_weight = 1.0 / n_assets
+
+            # assign equal weights for all dates
+            self.portfolio_weights.loc[:, assets] = equal_weight
+
+        # excluded asset (e.g., SPY) always has weight 0
+        if self.exclude in self.portfolio_weights.columns:
+            self.portfolio_weights.loc[:, self.exclude] = 0.0
+
         """
         TODO: Complete Task 1 Above
         """
@@ -114,7 +127,31 @@ class RiskParityPortfolio:
         TODO: Complete Task 2 Below
         """
 
+        # loop over time, starting after we have enough lookback data
+        for i in range(self.lookback + 1, len(df)):
+            # past "lookback" days of returns for non-excluded assets
+            window_returns = df_returns[assets].iloc[i - self.lookback : i]
 
+            # compute volatilities (standard deviation)
+            vol = window_returns.std()
+
+            # avoid division by zero
+            vol_replaced = vol.replace(0, np.nan)
+            inv_vol = 1.0 / vol_replaced
+
+            # if all vols are zero (very unlikely), fall back to equal weights
+            if np.isfinite(inv_vol).sum() == 0:
+                weights = np.ones(len(assets)) / len(assets)
+            else:
+                inv_vol = inv_vol.fillna(0.0)
+                weights = inv_vol / inv_vol.sum()
+
+            # assign weights for this date
+            self.portfolio_weights.loc[df.index[i], assets] = weights.values
+
+        # excluded asset always has weight 0
+        if self.exclude in self.portfolio_weights.columns:
+            self.portfolio_weights.loc[:, self.exclude] = 0.0
 
         """
         TODO: Complete Task 2 Above
@@ -187,12 +224,25 @@ class MeanVariancePortfolio:
                 """
                 TODO: Complete Task 3 Below
                 """
+                # decision variable: portfolio weights w_i >= 0
+                w = model.addMVar(n, lb=0.0, name="w")
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                # budget constraint: sum_i w_i = 1
+                model.addConstr(w.sum() == 1.0, name="budget")
 
+                # ---- build quadratic risk term w^T Σ w manually ----
+                risk_term = 0
+                for i in range(n):
+                    for j in range(n):
+                        coeff = Sigma[i, j]
+                        if coeff != 0:
+                            # Gurobi overloads * so this creates a QuadExpr term
+                            risk_term += coeff * w[i] * w[j]
+                # ----------------------------------------------------
+
+                # objective: maximize w^T µ - (γ/2) * w^T Σ w
+                obj = mu @ w - (gamma / 2.0) * risk_term
+                model.setObjective(obj, gp.GRB.MAXIMIZE)
                 """
                 TODO: Complete Task 3 Above
                 """

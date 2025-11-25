@@ -70,8 +70,66 @@ class MyPortfolio:
         """
         TODO: Complete Task 4 Below
         """
-        
-        
+        ret = self.returns[assets]
+
+        # parameters
+        look_mom = 252
+        look_vol = 20
+        look_ma = 200
+        mom_threshold = 0.10      # 10% over past 252 days
+        target_vol = 0.20         # 20% annual volatility
+        ann = np.sqrt(252)
+
+        spy = self.price[self.exclude]
+        start = max(look_mom, look_vol, look_ma)
+
+        for t in range(start, len(self.price)):
+            # ===== RISK FILTER =====
+            spy_window = spy.iloc[t - look_ma:t]
+            if spy.iloc[t] < spy_window.mean():
+                continue
+
+            # ===== MOMENTUM & VOLATILITY =====
+            mom_window = ret.iloc[t - look_mom:t]
+            vol_window = ret.iloc[t - look_vol:t]
+
+            if mom_window.isnull().values.any() or vol_window.isnull().values.any():
+                continue
+
+            momentum = (1 + mom_window).prod() - 1
+            vol = vol_window.std().replace(0, np.nan)
+
+            score = (momentum / vol).replace([np.inf, -np.inf], np.nan).fillna(0)
+
+            # Require positive trends
+            score = score[score > 0]
+            if score.empty:
+                continue
+
+            # Also require momentum > threshold
+            strong = score[momentum[score.index] > mom_threshold]
+            if strong.empty:
+                continue
+
+            # ===== PICK TOP 2 =====
+            k = min(2, len(strong))
+            picks = strong.nlargest(k)
+            raw_weights = picks / picks.sum()   # equal-weight within top 2
+
+            # ===== PORTFOLIO VOLATILITY TARGETING =====
+            # approximate portfolio volatility from weighted vol
+            port_vol_daily = (vol[raw_weights.index] * raw_weights).sum()
+            port_vol_ann = port_vol_daily * ann
+
+            scale = target_vol / port_vol_ann
+            scale = max(0, min(scale, 1.0))
+
+            w = pd.Series(0.0, index=self.price.columns)
+            for a in raw_weights.index:
+                w[a] = raw_weights[a] * scale
+
+            self.portfolio_weights.iloc[t] = w.values
+ 
         """
         TODO: Complete Task 4 Above
         """
